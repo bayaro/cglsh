@@ -1,13 +1,22 @@
 #!/bin/bash
 
 function draw() {
+    local color
+    if [ -z "$4" ]; then
+        color=WHITE
+    else
+        color=$4
+    fi
+    eval color=\"\$$color\"
     echo -n "[$1;${2}H" # set cursor position
+    echo -n "$color"
     echo -n "$3" # show string
     echo -n '[?25l' # hide cursor
 }
 
 function bye_bye() {
     stty sane
+    draw $ROWS $COLS ""
     echo '[?25h' # show cursor
 }
 
@@ -19,13 +28,64 @@ echo '[?71' # turn off auto-wrap
 echo '' # clear screen
 echo -n '[?25l' # hide cursor
 
-AGE=10
-while [ $AGE -gt 0 ] ; do
-    draw 20 20 "AGE: $AGE"
+BLACK='[38m'
+GREY='[1;30m'
+RED='[1;31m'
+GREEN='[1;32m'
+YELLOW='[1;33m'
+BLUE='[1;34m'
+MAGENTA='[1;35m'
+CYAN='[1;36m'
+WHITE='[1;37m'
+
+OFF='[0m'
+FILL='[7m'
+CLEAR='[39m[49m'
+
+iBLACK='[38m'
+iGREY='[0;30m'
+iRED='[0;31m'
+iGREEN='[0;32m'
+iYELLOW='[0;33m'
+iBLUE='[0;34m'
+iMAGENTA='[0;35m'
+iCYAN='[0;36m'
+iWHITE='[0;37m'
+
+# background
+_BLACK='[1;30m'
+_RED='[1;41m'
+_GREEN='[1;42m'
+_YELLOW='[1;43m'
+_BLUE='[1;44m'
+_MAGENTA='[1;45m'
+_CYAN='[01;46m'
+_WHITE='[1;47m'
+
+function draw_status() {
+    msg=`printf "%-${msg_length}s" ""`
+    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" CLEAR
+    msg="DAYS LEFT: $DAYS"
+    msg_length=${#msg}
+    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" CYAN
+}
+
+ROWS=`stty -a | grep rows | sed -r 's/.*rows ([0-9]+);.*/\1/'`
+COLS=`stty -a | grep columns | sed -r 's/.*columns ([0-9]+);.*/\1/'`
+
+STATUSROW=$ROWS
+ROWS=$(( $ROWS - 1 )) # last rows will be used as status line
+
+DAYS=10
+while [ $DAYS -gt 0 ] ; do
+    draw_status
 
     sleep 1
     if [ "`dd bs=1 count=1 iflag=nonblock status=none 2>/dev/null`" == "" ]; then # stop on ^C
         break
     fi
-    AGE=$(( $AGE - 1 ))
+    DAYS=$(( $DAYS - 1 ))
 done
+
+DAYS=0
+draw_status
