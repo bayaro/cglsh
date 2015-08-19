@@ -12,8 +12,13 @@ echo '[?71' # turn off auto-wrap
 echo '' # clear screen
 echo -n '[?25l' # hide cursor
 
-draw 20 20 "`date`"
-sleep 3
+AGE=3
+while [ $AGE -gt 0 ] ; do
+    draw 20 20 "AGE: $AGE"
+
+    sleep 1
+    AGE=$(( $AGE - 1 ))
+done
 
 stty sane
 echo '[?25h' # show cursor
