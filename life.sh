@@ -6,11 +6,10 @@ COLS=`stty -a | grep columns | sed -r 's/.*columns ([0-9]+);.*/\1/'`
 STATUSROW=$ROWS
 ROWS=$(( $ROWS - 1 )) # last rows will be used as status line
 
-MAX_GEN=50 # max generations count
+MAX_GEN=-1 # max generations count
 MAP_SIZE=$(( $ROWS * $COLS ))
 INITIAL_POP_SIZE=$(( $MAP_SIZE / 10 ))
 
-BLACK='[38m'
 GREY='[1;30m'
 RED='[1;31m'
 GREEN='[1;32m'
@@ -19,12 +18,9 @@ BLUE='[1;34m'
 MAGENTA='[1;35m'
 CYAN='[1;36m'
 WHITE='[1;37m'
+BLACK='[1;38m'
+CLEAR='[39m'
 
-OFF='[0m'
-FILL='[7m'
-CLEAR='[39m[49m'
-
-iBLACK='[38m'
 iGREY='[0;30m'
 iRED='[0;31m'
 iGREEN='[0;32m'
@@ -33,17 +29,27 @@ iBLUE='[0;34m'
 iMAGENTA='[0;35m'
 iCYAN='[0;36m'
 iWHITE='[0;37m'
+iBLACK='[0;38m'
 
 # background
-_BLACK='[1;30m'
-_RED='[1;41m'
-_GREEN='[1;42m'
-_YELLOW='[1;43m'
-_BLUE='[1;44m'
-_MAGENTA='[1;45m'
-_CYAN='[01;46m'
-_WHITE='[1;47m'
-_GREY='[1;48m'
+_GREY='[40m'
+_RED='[41m'
+_GREEN='[42m'
+_YELLOW='[43m'
+_BLUE='[44m'
+_MAGENTA='[45m'
+_CYAN='[46m'
+_WHITE='[47m'
+_BLACK='[48m'
+_CLEAR='[49m'
+
+function hello() {
+    stty raw -echo
+    echo -n 'c' # VT100 reset
+    echo '[?71' # turn off auto-wrap
+    echo '' # clear screen
+    echo -n '[?25l' # hide cursor
+}
 
 function bye_bye() {
     stty sane
@@ -52,14 +58,10 @@ function bye_bye() {
 }
 
 function draw() {
-    local color
-    if [ -z "$4" ]; then
-        color=$WHITE
-    else
-        color="$4"
-    fi
     echo -n "[$1;${2}H" # set cursor position
-    echo -n "$color"
+    if [ "x$4" != "x" ]; then
+        echo -n "$4"
+    fi
     echo -n "$3" # show string
     echo -n '[?25l' # hide cursor
 }
@@ -67,10 +69,42 @@ function draw() {
 function draw_status() {
     # msg & msg_length are not local, they will be used to hide old status on next step
     msg=`printf "%-${msg_length}s" ""`
-    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" $CLEAR
+    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" $_CLEAR$CLEAR
     msg="MAP: ${COLS}x${ROWS} POPULATION: ${#POP[@]} GEN: $GEN"
     msg_length=${#msg}
     draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" $CYAN
+}
+
+function draw_population() {
+    if [ -z "$1" ]; then
+        echo -n $_RED$WHITE
+    else
+        echo -n $1
+    fi
+    local C
+    local R
+    local i
+    for i in "${!POP[@]}"; do
+        C=${i%%,*}
+        R=${i##*,}
+        draw $R $C ${POP[$i]}
+    done
+}
+
+function draw_dead {
+    if [ -z "$1" ]; then
+        echo -n $_CLEAR$GREEN
+    else
+        echo -n $1
+    fi
+    local C
+    local R
+    local i
+    for i in "${!DEAD[@]}"; do
+        C=${i%%,*}
+        R=${i##*,}
+        draw $R $C ${DEAD[$i]}
+    done
 }
 
 function init_population() {
@@ -91,38 +125,26 @@ function init_population() {
     done
 }
 
-function draw_population() {
-    local C
-    local R
-    local i
-    for i in "${!POP[@]}"; do
-        C=${i%%,*}
-        R=${i##*,}
-        draw $R $C ${POP[$i]} "$1"
-    done
-}
-
-function draw_dead {
-    local C
-    local R
-    local i
-    for i in "${!DEAD[@]}"; do
-        C=${i%%,*}
-        R=${i##*,}
-        draw $R $C ${DEAD[$i]} $GREY
-    done
-}
-
 # with this function we can in future get not only neigbours of 1st level but also 2nd, 3rd, etc :)
 function check_neigbours() {
-    local CC=$1
-    local RR=$2
+    local MiR=$(( $1 - 1 ))
+    if [ $MiR -lt 1 ]; then MiR=1; fi
+    local MaR=$(( $1 + 1 ))
+    if [ $MaR -gt $ROWS ]; then MaR=$ROWS; fi
+    local MiC=$(( $2 - 1 ))
+    if [ $MiC -lt 1 ]; then MiC=1; fi
+    local MaC=$(( $2 + 1 ))
+    if [ $MaC -gt $COLS ]; then MaC=$COLS; fi
     local C
     local R
     local has_neig_count
-    for (( C = $(( $CC - 1 )); C <= $(( $CC + 1 )); C++ )); do
-        for (( R = $(( $RR - 1 )); R <= $(( $RR + 1 )); R++ )); do
-            if [ "x${POP[$C,$R]}" != "x" ]; then 
+    for (( C = $MiC; C <= $MaC; C++ )); do
+        for (( R = $MiR; R <= $MaR; R++ )); do
+            if [ "x${POP[$C,$R]}" == "x" ]; then 
+                # empty cell, mark it as have +1 neighbor
+                has_neig_count=${TOBEBURN[$C,$R]}
+                TOBEBURN[$C,$R]=$(( $has_neig_count + 1 ))
+            else
                 # non empty, increase count of neigbours
                 NEIG_COUNT=$(( $NEIG_COUNT + 1 ))
             fi
@@ -134,17 +156,31 @@ function check_population() {
     local C
     local R
     local i
+    TOBEBURN=
+    declare -A TOBEBURN
+    NEW_NCOUNT=
+    declare -A NEW_NCOUNT
     for i in "${!POP[@]}"; do
         C=${i%%,*}
         R=${i##*,}
         NEIG_COUNT=0
-        check_neigbours $C $R
-        if [ $NEIG_COUNT -ne 3 ] && [ $NEIG_COUNT -ne 4 ]; then
-            DEAD[$i]=${POP[$i]}
+        check_neigbours $R $C
+        if [ $NEIG_COUNT -eq 3 ] || [ $NEIG_COUNT -eq 4 ]; then
+            NEW_NCOUNT[$i]=$(( $NEIG_COUNT - 1 ))
+        else
+            DEAD[$i]=$(( $NEIG_COUNT - 1 ))
         fi
     done
     for i in "${!DEAD[@]}"; do
         unset POP[$i]
+    done
+    for i in "${!NEW_NCOUNT[@]}"; do
+        POP[$i]=${NEW_NCOUNT[$i]}
+    done
+    for i in "${!TOBEBURN[@]}"; do
+        if [ ${TOBEBURN[$i]} -eq 3 ]; then
+            POP[$i]="+"
+        fi
     done
 }
 
@@ -152,32 +188,33 @@ function check_population() {
 #     main()
 ########################################################################################
 
-declare -A POP # key (C,R) value gen_num
 declare -A DEAD
+declare -A POP # key (C,R) value gen_num
 init_population
 
 trap bye_bye SIGINT SIGTERM INT EXIT
-
-stty raw -echo
-echo -n 'c' # VT100 reset
-echo '[?71' # turn off auto-wrap
-echo '' # clear screen
-echo -n '[?25l' # hide cursor
+hello
 
 GEN=1
 NEIG_COUNT=0
-while [ $MAX_GEN -gt $GEN ] ; do
+while [ $MAX_GEN -le 0 ] || [ $MAX_GEN -gt $GEN ] ; do
     draw_dead
-    draw_population $_RED
+    draw_population
     draw_status
 
-    declare -A DEAD
-    check_population
     #sleep 1
-    #if [ "`dd bs=1 count=1 iflag=nonblock status=none 2>/dev/null`" == "" ]; then # stop on ^C
-    if [ "`dd bs=1 count=1 status=none 2>/dev/null`" == "" ]; then # stop on ^C
-        break
-    fi
+    case "`dd bs=1 count=1 iflag=nonblock status=none 2>/dev/null`" in
+    #case "`dd bs=1 count=1 status=none 2>/dev/null`" in
+    "") break
+        ;;
+    esac
+
+    draw_dead $_CLEAR$GREY
+    for i in "${!DEAD[@]}"; do # DEAD= does not work, declare -A DEAD also
+        unset DEAD[$i]
+    done
+    check_population
+
     GEN=$(( $GEN + 1 ))
 done
 
