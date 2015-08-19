@@ -6,7 +6,7 @@ COLS=`stty -a | grep columns | sed -r 's/.*columns ([0-9]+);.*/\1/'`
 STATUSROW=$ROWS
 ROWS=$(( $ROWS - 1 )) # last rows will be used as status line
 
-MAX_GEN=10 # max generations count
+MAX_GEN=50 # max generations count
 MAP_SIZE=$(( $ROWS * $COLS ))
 INITIAL_POP_SIZE=$(( $MAP_SIZE / 10 ))
 
@@ -43,6 +43,7 @@ _BLUE='[1;44m'
 _MAGENTA='[1;45m'
 _CYAN='[01;46m'
 _WHITE='[1;47m'
+_GREY='[1;48m'
 
 function bye_bye() {
     stty sane
@@ -53,11 +54,10 @@ function bye_bye() {
 function draw() {
     local color
     if [ -z "$4" ]; then
-        color=WHITE
+        color=$WHITE
     else
-        color=$4
+        color="$4"
     fi
-    eval color=\"\$$color\"
     echo -n "[$1;${2}H" # set cursor position
     echo -n "$color"
     echo -n "$3" # show string
@@ -67,10 +67,10 @@ function draw() {
 function draw_status() {
     # msg & msg_length are not local, they will be used to hide old status on next step
     msg=`printf "%-${msg_length}s" ""`
-    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" CLEAR
+    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" $CLEAR
     msg="MAP: ${COLS}x${ROWS} POPULATION: ${#POP[@]} GEN: $GEN"
     msg_length=${#msg}
-    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" CYAN
+    draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" $CYAN
 }
 
 function init_population() {
@@ -87,7 +87,7 @@ function init_population() {
             C=$(( $O % $COLS ))
             R=$(( ( $O - $C ) / $COLS + 1 ))
         done
-        POP[$C,$R]=$C,$R
+        POP[$C,$R]=0
     done
 }
 
@@ -95,10 +95,21 @@ function draw_population() {
     local C
     local R
     local i
-    for i in "${POP[@]}"; do
+    for i in "${!POP[@]}"; do
         C=${i%%,*}
         R=${i##*,}
-        draw $R $C '0' _RED
+        draw $R $C ${POP[$i]} "$1"
+    done
+}
+
+function draw_dead {
+    local C
+    local R
+    local i
+    for i in "${!DEAD[@]}"; do
+        C=${i%%,*}
+        R=${i##*,}
+        draw $R $C ${DEAD[$i]} $GREY
     done
 }
 
@@ -109,15 +120,9 @@ function check_neigbours() {
     local C
     local R
     local has_neig_count
-    NEIG_COUNT=-1 # to avoid calculation current cell as neighbor of self
     for (( C = $(( $CC - 1 )); C <= $(( $CC + 1 )); C++ )); do
         for (( R = $(( $RR - 1 )); R <= $(( $RR + 1 )); R++ )); do
-            if [ "x${POP[$C,$R]}" == "x" ]; then 
-                # empty cell, mark it as have +1 neighbor
-                has_neig_count=${EMPTYMAP[$C,$R]}
-                if [ "x$has_neig_count" == "x" ]; then has_neig_count=0; fi
-                EMPTYMAP[$C,$R]=$(( $has_neig_count + 1 ))
-            else
+            if [ "x${POP[$C,$R]}" != "x" ]; then 
                 # non empty, increase count of neigbours
                 NEIG_COUNT=$(( $NEIG_COUNT + 1 ))
             fi
@@ -125,12 +130,30 @@ function check_neigbours() {
     done
 }
 
+function check_population() {
+    local C
+    local R
+    local i
+    for i in "${!POP[@]}"; do
+        C=${i%%,*}
+        R=${i##*,}
+        NEIG_COUNT=0
+        check_neigbours $C $R
+        if [ $NEIG_COUNT -ne 3 ] && [ $NEIG_COUNT -ne 4 ]; then
+            DEAD[$i]=${POP[$i]}
+        fi
+    done
+    for i in "${!DEAD[@]}"; do
+        unset POP[$i]
+    done
+}
+
 ########################################################################################
 #     main()
 ########################################################################################
 
-declare -A POP
-declare -A EMPTYMAP
+declare -A POP # key (C,R) value gen_num
+declare -A DEAD
 init_population
 
 trap bye_bye SIGINT SIGTERM INT EXIT
@@ -142,10 +165,14 @@ echo '' # clear screen
 echo -n '[?25l' # hide cursor
 
 GEN=1
+NEIG_COUNT=0
 while [ $MAX_GEN -gt $GEN ] ; do
-    draw_population
+    draw_dead
+    draw_population $_RED
     draw_status
 
+    declare -A DEAD
+    check_population
     #sleep 1
     #if [ "`dd bs=1 count=1 iflag=nonblock status=none 2>/dev/null`" == "" ]; then # stop on ^C
     if [ "`dd bs=1 count=1 status=none 2>/dev/null`" == "" ]; then # stop on ^C
