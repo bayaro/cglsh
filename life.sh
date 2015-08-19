@@ -65,6 +65,7 @@ function draw() {
 }
 
 function draw_status() {
+    # msg & msg_length are not local, they will be used to hide old status on next step
     msg=`printf "%-${msg_length}s" ""`
     draw $STATUSROW $(( $COLS - $msg_length - 1 )) "$msg" CLEAR
     msg="MAP: ${COLS}x${ROWS} POPULATION: ${#POP[@]} GEN: $GEN"
@@ -73,6 +74,10 @@ function draw_status() {
 }
 
 function init_population() {
+    local O
+    local C
+    local R
+    local i
     for (( i = 0; i < $INITIAL_POP_SIZE; i++ )); do
         O=$(( RANDOM % $MAP_SIZE ))
         C=$(( $O % $COLS + 1 ))
@@ -87,10 +92,36 @@ function init_population() {
 }
 
 function draw_population() {
+    local C
+    local R
+    local i
     for i in "${POP[@]}"; do
         C=${i%%,*}
         R=${i##*,}
         draw $R $C '0' _RED
+    done
+}
+
+# with this function we can in future get not only neigbours of 1st level but also 2nd, 3rd, etc :)
+function check_neigbours() {
+    local CC=$1
+    local RR=$2
+    local C
+    local R
+    local has_neig_count
+    NEIG_COUNT=-1 # to avoid calculation current cell as neighbor of self
+    for (( C = $(( $CC - 1 )); C <= $(( $CC + 1 )); C++ )); do
+        for (( R = $(( $RR - 1 )); R <= $(( $RR + 1 )); R++ )); do
+            if [ "x${POP[$C,$R]}" == "x" ]; then 
+                # empty cell, mark it as have +1 neighbor
+                has_neig_count=${EMPTYMAP[$C,$R]}
+                if [ "x$has_neig_count" == "x" ]; then has_neig_count=0; fi
+                EMPTYMAP[$C,$R]=$(( $has_neig_count + 1 ))
+            else
+                # non empty, increase count of neigbours
+                NEIG_COUNT=$(( $NEIG_COUNT + 1 ))
+            fi
+        done
     done
 }
 
@@ -99,6 +130,7 @@ function draw_population() {
 ########################################################################################
 
 declare -A POP
+declare -A EMPTYMAP
 init_population
 
 trap bye_bye SIGINT SIGTERM INT EXIT
